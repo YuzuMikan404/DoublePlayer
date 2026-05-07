@@ -4,6 +4,7 @@ package com.doubleplayer.app.ui
 import android.net.Uri
 // Android Intentのインポート（エクスポート時の共有に使用）
 import android.content.Intent
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 // Hilt依存注入のインポート
 import dagger.hilt.android.lifecycle.HiltViewModel

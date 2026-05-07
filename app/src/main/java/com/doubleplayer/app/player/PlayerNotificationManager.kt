@@ -152,8 +152,7 @@ class PlayerNotificationManager @Inject constructor(
             // MediaStyleを適用して音楽プレイヤー風の通知にする
             // （androidx.media:mediaライブラリ不要のシンプル実装）
             .setStyle(NotificationCompat.BigTextStyle()
-                .bigText("A: $trackAFileName
-B: $trackBFileName")
+                .bigText("A: $trackAFileName  B: $trackBFileName")
             )
             .build()
     }

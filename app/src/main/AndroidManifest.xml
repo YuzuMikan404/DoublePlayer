@@ -13,10 +13,18 @@
     <!-- 外部ストレージの音声ファイル読み込み（Android 13以上） -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
-    <!-- 外部ストレージ読み込み（Android 12以下） -->
+    <!-- 外部ストレージ読み込み（Android 10以下） -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
+        android:maxSdkVersion="29" />
+
+    <!--
+        すべてのファイルへのアクセス（Android 11以上）
+        SDカード・USBドライブなど外部ストレージデバイスのファイルを読み取るために必要。
+        READ_MEDIA_AUDIO や READ_EXTERNAL_STORAGE では外部デバイスにアクセスできないため
+        このパーミッションを使用する。
+    -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <!-- フォアグラウンドサービス（バックグラウンド再生） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

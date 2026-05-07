@@ -1,8 +1,8 @@
 package com.doubleplayer.app.ui
 
 // Android ActivityResultのインポート（フォルダ選択・ファイルインポートに使用）
-import android.app.Activity
 import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 // Compose UIのインポート
@@ -197,7 +197,29 @@ fun SettingsScreen(
 }
 
 /**
+ * フォルダURIから表示用のパス文字列を生成するヘルパー関数
+ * SAFのURIをユーザーが読みやすい形式に変換する
+ */
+private fun uriToDisplayPath(uri: Uri): String {
+    // content://com.android.externalstorage.documents/tree/primary%3AMusic 形式を
+    // /storage/emulated/0/Music のような形式に変換する
+    val path = uri.lastPathSegment ?: return uri.toString()
+    return when {
+        path.startsWith("primary:") -> {
+            "/storage/emulated/0/" + path.removePrefix("primary:")
+        }
+        path.contains(":") -> {
+            val parts = path.split(":", limit = 2)
+            "/storage/${parts[0]}/${parts[1]}"
+        }
+        else -> path
+    }
+}
+
+/**
  * FolderSettingsTab - フォルダ設定タブのコンテンツ
+ * SAF（Storage Access Framework）のフォルダピッカーを使用して
+ * 外部ストレージデバイスのフォルダも選択できるようにする
  */
 @Composable
 private fun FolderSettingsTab(
@@ -208,9 +230,37 @@ private fun FolderSettingsTab(
     onTrackAFolderChange: (String) -> Unit,
     onTrackBFolderChange: (String) -> Unit
 ) {
-    // フォルダパス入力ダイアログの表示フラグ
-    var showTrackADialog by remember { mutableStateOf(false) }
-    var showTrackBDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    // ========== SAFフォルダピッカーランチャー（トラックA）==========
+    val trackAPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            // 永続的なアクセス権限を取得する（アプリ再起動後もアクセス可能にする）
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+            // URIをString化してViewModelに渡す
+            onTrackAFolderChange(uri.toString())
+        }
+    }
+
+    // ========== SAFフォルダピッカーランチャー（トラックB）==========
+    val trackBPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            // 永続的なアクセス権限を取得する（アプリ再起動後もアクセス可能にする）
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+            // URIをString化してViewModelに渡す
+            onTrackBFolderChange(uri.toString())
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -221,9 +271,18 @@ private fun FolderSettingsTab(
     ) {
         // ========== トラックA フォルダ設定 ==========
         SettingsSection(title = "トラックA フォルダ") {
-            // 現在設定されているパス
+            // 現在設定されているパスを表示する（URIを読みやすいパスに変換）
+            val displayPathA = if (trackAFolder.isEmpty()) {
+                "フォルダ未設定"
+            } else {
+                try {
+                    uriToDisplayPath(Uri.parse(trackAFolder))
+                } catch (e: Exception) {
+                    trackAFolder
+                }
+            }
             Text(
-                text = if (trackAFolder.isEmpty()) "フォルダ未設定" else trackAFolder,
+                text = displayPathA,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (trackAFolder.isEmpty())
                     MaterialTheme.colorScheme.error
@@ -239,9 +298,15 @@ private fun FolderSettingsTab(
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
-            // フォルダパス入力ボタン
+            // SAFフォルダピッカーを起動するボタン
             OutlinedButton(
-                onClick = { showTrackADialog = true },
+                onClick = {
+                    // 現在設定済みのURIがあれば初期表示フォルダとして渡す
+                    val initialUri = if (trackAFolder.isNotEmpty()) {
+                        Uri.parse(trackAFolder)
+                    } else null
+                    trackAPickerLauncher.launch(initialUri)
+                },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(
@@ -250,11 +315,11 @@ private fun FolderSettingsTab(
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("フォルダパスを設定")
+                Text("フォルダを選択")
             }
             // 説明テキスト
             Text(
-                text = "例: /storage/emulated/0/Music/Morning",
+                text = "外部ストレージ（SDカード・USBドライブ）も選択できます",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
@@ -262,8 +327,17 @@ private fun FolderSettingsTab(
 
         // ========== トラックB フォルダ設定 ==========
         SettingsSection(title = "トラックB フォルダ（BGM）") {
+            val displayPathB = if (trackBFolder.isEmpty()) {
+                "フォルダ未設定"
+            } else {
+                try {
+                    uriToDisplayPath(Uri.parse(trackBFolder))
+                } catch (e: Exception) {
+                    trackBFolder
+                }
+            }
             Text(
-                text = if (trackBFolder.isEmpty()) "フォルダ未設定" else trackBFolder,
+                text = displayPathB,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (trackBFolder.isEmpty())
                     MaterialTheme.colorScheme.error
@@ -279,7 +353,12 @@ private fun FolderSettingsTab(
             }
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedButton(
-                onClick = { showTrackBDialog = true },
+                onClick = {
+                    val initialUri = if (trackBFolder.isNotEmpty()) {
+                        Uri.parse(trackBFolder)
+                    } else null
+                    trackBPickerLauncher.launch(initialUri)
+                },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(
@@ -288,90 +367,15 @@ private fun FolderSettingsTab(
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("フォルダパスを設定")
+                Text("フォルダを選択")
             }
             Text(
-                text = "サブフォルダ内のファイルも自動検索されます",
+                text = "外部ストレージ（SDカード・USBドライブ）も選択できます\nサブフォルダ内のファイルも自動検索されます",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
         }
     }
-
-    // ========== フォルダパス入力ダイアログ ==========
-    if (showTrackADialog) {
-        FolderPathInputDialog(
-            title = "トラックA フォルダパス",
-            currentPath = trackAFolder,
-            onConfirm = { path ->
-                onTrackAFolderChange(path)
-                showTrackADialog = false
-            },
-            onDismiss = { showTrackADialog = false }
-        )
-    }
-    if (showTrackBDialog) {
-        FolderPathInputDialog(
-            title = "トラックB フォルダパス",
-            currentPath = trackBFolder,
-            onConfirm = { path ->
-                onTrackBFolderChange(path)
-                showTrackBDialog = false
-            },
-            onDismiss = { showTrackBDialog = false }
-        )
-    }
-}
-
-/**
- * FolderPathInputDialog - フォルダパスを手動入力するダイアログ
- */
-@Composable
-private fun FolderPathInputDialog(
-    title: String,
-    currentPath: String,
-    onConfirm: (String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    // 入力中のパスを管理する
-    var inputPath by remember { mutableStateOf(currentPath) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column {
-                Text(
-                    text = "Androidのフルパスで入力してください",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                // パス入力フィールド
-                OutlinedTextField(
-                    value = inputPath,
-                    onValueChange = { inputPath = it },
-                    label = { Text("フォルダパス") },
-                    placeholder = { Text("/storage/emulated/0/Music") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(inputPath.trim()) },
-                enabled = inputPath.trim().isNotEmpty()
-            ) {
-                Text("設定")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("キャンセル")
-            }
-        }
-    )
 }
 
 /**

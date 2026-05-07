@@ -1,0 +1,54 @@
+{
+  "trackA": {
+    "folderPath": "",
+    "volume": 0.8,
+    "playbackSpeed": 1.0,
+    "gapBetweenTracks": 0
+  },
+  "trackB": {
+    "folderPath": "",
+    "volume": 0.3,
+    "linkedToTrackA": true,
+    "linkedRatio": 0.4,
+    "shuffle": true
+  },
+  "fade": {
+    "fadeInSeconds": 3.0,
+    "fadeOutSeconds": 3.0,
+    "fadeOutBeforeEndSeconds": 10.0
+  },
+  "equalizer": {
+    "bassLevel": 0,
+    "trebleLevel": 0
+  },
+  "schedule": {
+    "triggers": [
+      {
+        "id": "morning",
+        "enabled": true,
+        "startHour": 6,
+        "startMinute": 0,
+        "endHour": 9,
+        "endMinute": 0
+      }
+    ],
+    "activeDays": {
+      "sunday": false,
+      "monday": true,
+      "tuesday": true,
+      "wednesday": true,
+      "thursday": true,
+      "friday": true,
+      "saturday": false
+    },
+    "skipHolidays": true,
+    "countdownSeconds": 0
+  },
+  "macroDroid": {
+    "playAction": "com.doubleplayer.ACTION_PLAY",
+    "pauseAction": "com.doubleplayer.ACTION_PAUSE",
+    "stopAction": "com.doubleplayer.ACTION_STOP",
+    "nextAction": "com.doubleplayer.ACTION_NEXT",
+    "folderExtra": "folder_path"
+  }
+}

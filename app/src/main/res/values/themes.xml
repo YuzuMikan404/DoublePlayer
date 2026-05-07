@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DoublePlayer AndroidXMLテーマ定義 -->
+<!-- ComposeアプリではActivityのウィンドウ背景などに使用する -->
+<resources>
+    <!-- Composeアプリ用のベーステーマ（Theme.AppCompat.NoActionBar相当） -->
+    <style name="Theme.DoublePlayer" parent="android:Theme.Material.NoActionBar">
+        <!-- ステータスバーを透明にしてComposeが制御できるようにする -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <!-- ウィンドウ背景を黒にしてComposeのサーフェスと合わせる -->
+        <item name="android:windowBackground">@android:color/black</item>
+        <!-- ナビゲーションバーを透明にする -->
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

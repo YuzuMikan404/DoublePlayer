@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 8.0（API26）以上のアダプティブアイコン定義 -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 背景レイヤー：単色の深紫 -->
+    <background android:drawable="@color/ic_launcher_background" />
+    <!-- 前景レイヤー：アイコン画像 -->
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

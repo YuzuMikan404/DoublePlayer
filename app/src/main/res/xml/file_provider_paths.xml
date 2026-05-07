@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    FileProvider用パス設定ファイル
+    BackupManagerがエクスポートしたJSONファイルをキャッシュフォルダから共有するために使用する
+    仕様書セクション12「エクスポート先：共有シート」に対応する
+-->
+<paths>
+    <!-- アプリ内部キャッシュフォルダを共有対象として指定する -->
+    <!-- BackupManager.ktでgetCacheDir()に書き出したバックアップJSONファイルを共有する -->
+    <cache-path
+        name="backup_files"
+        path="." />
+</paths>

@@ -1,0 +1,96 @@
+# DoublePlayer - Gradleバージョンカタログ
+# 仕様書セクション10「ライブラリ一覧」に基づいて定義する
+# 全ライブラリのバージョンをここで一元管理する
+
+[versions]
+# Kotlinバージョン
+kotlin = "2.0.0"
+# Android Gradle Plugin
+agp = "8.5.0"
+# KSP（Kotlin Symbol Processing）
+ksp = "2.0.0-1.0.21"
+# Jetpack Compose BOM（Bill of Materials）
+compose-bom = "2024.09.00"
+# Media3（ExoPlayer後継）
+media3 = "1.4.0"
+# Hilt（依存注入）
+hilt = "2.51.1"
+# DataStore（設定保存）
+datastore = "1.1.1"
+# Navigation Compose
+navigation-compose = "2.8.0"
+# Glance（ホーム画面ウィジェット）
+glance = "1.1.0"
+# Lifecycle
+lifecycle = "2.8.4"
+# AndroidX Core
+core-ktx = "1.13.1"
+# Activity Compose
+activity-compose = "1.9.1"
+# Gson（JSON処理）
+gson = "2.11.0"
+# DocumentFile（SAF経由のファイルアクセス）
+documentfile = "1.0.1"
+# Coroutines
+coroutines = "1.8.1"
+
+[libraries]
+# ========== AndroidX Core ==========
+androidx-core = { group = "androidx.core", name = "core-ktx", version.ref = "core-ktx" }
+
+# ========== Lifecycle ==========
+androidx-lifecycle = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+# collectAsStateWithLifecycle()を使うために必要
+androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
+
+# ========== Jetpack Compose ==========
+compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "compose-bom" }
+compose-ui = { group = "androidx.compose.ui", name = "ui" }
+compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+compose-ui-tooling-debug = { group = "androidx.compose.ui", name = "ui-tooling" }
+compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+compose-activity = { group = "androidx.activity", name = "activity-compose", version.ref = "activity-compose" }
+# Material Icons拡張パック（全アイコンを含む）
+compose-material-icons = { group = "androidx.compose.material", name = "material-icons-extended" }
+
+# ========== Media3（ExoPlayer後継）==========
+media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
+media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
+media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
+
+# ========== Hilt（依存注入）==========
+hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
+hilt-compiler = { group = "com.google.dagger", name = "hilt-compiler", version.ref = "hilt" }
+hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version = "1.2.0" }
+
+# ========== DataStore（設定保存）==========
+datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+
+# ========== Navigation Compose ==========
+navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation-compose" }
+
+# ========== Glance（ホーム画面ウィジェット）==========
+glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glance" }
+glance-material3 = { group = "androidx.glance", name = "glance-material3", version.ref = "glance" }
+
+# ========== DocumentFile（SAF経由のファイルアクセス）==========
+androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
+
+# ========== Gson（JSON処理）==========
+gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
+
+# ========== Coroutines（非同期処理）==========
+kotlinx-coroutines = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+
+[plugins]
+# Android Application Gradleプラグイン
+android-application = { id = "com.android.application", version.ref = "agp" }
+# Kotlin Androidプラグイン
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+# Kotlin Compose Compilerプラグイン
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+# Hilt Gradleプラグイン
+hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+# KSP（Kotlin Symbol Processing）プラグイン
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

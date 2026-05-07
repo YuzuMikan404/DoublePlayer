@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DoublePlayer カラーリソース定義 -->
+<resources>
+    <!-- アダプティブアイコンの背景色（深い紫） -->
+    <color name="ic_launcher_background">#1E1440</color>
+</resources>

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DoublePlayer 文字列リソース（日本語） -->
+<resources>
+    <!-- アプリ名 -->
+    <string name="app_name">DoublePlayer</string>
+    <!-- 通知チャンネル -->
+    <string name="notification_channel_id">doubleplayer_playback</string>
+    <string name="notification_channel_name">DoublePlayer 再生</string>
+    <string name="notification_channel_description">DoublePlayerの再生コントロール通知</string>
+    <!-- 通知ボタンラベル -->
+    <string name="notification_action_prev">前へ</string>
+    <string name="notification_action_play">再生</string>
+    <string name="notification_action_pause">一時停止</string>
+    <string name="notification_action_next">次へ</string>
+    <string name="notification_action_stop">停止</string>
+    <string name="notification_action_exit">終了</string>
+    <!-- 再生状態ラベル -->
+    <string name="playback_playing">再生中</string>
+    <string name="playback_paused">一時停止中</string>
+    <string name="playback_stopped">停止中</string>
+    <!-- トラックラベル -->
+    <string name="track_a_label">トラックA（メイン）</string>
+    <string name="track_b_label">トラックB（BGM）</string>
+    <!-- ファイルが未設定の時のプレースホルダー -->
+    <string name="no_file_selected">ファイルが設定されていません</string>
+    <string name="no_folder_selected">フォルダ未設定</string>
+    <!-- エラーメッセージ -->
+    <string name="error_folder_not_found">フォルダが見つかりません</string>
+    <string name="error_no_audio_files">音声ファイルが見つかりません</string>
+    <string name="error_playback_failed">再生に失敗しました。次のファイルへスキップします</string>
+    <!-- FileProviderの認証局（BackupManager用） -->
+    <string name="file_provider_authority">com.doubleplayer.app.fileprovider</string>
+    <!-- ウィジェットラベル -->
+    <string name="widget_label">DoublePlayer コントロール</string>
+</resources>

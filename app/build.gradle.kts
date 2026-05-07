@@ -55,9 +55,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    kotlinOptions {
-        // Kotlin JVMターゲット
-        jvmTarget = "11"
+    kotlin {
+        // Kotlin JVMターゲット（compilerOptionsへ移行）
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+        }
     }
 
     buildFeatures {

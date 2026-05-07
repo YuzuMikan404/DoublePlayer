@@ -24,12 +24,7 @@ dependencyResolutionManagement {
         // Maven Centralリポジトリ
         mavenCentral()
     }
-    // バージョンカタログ（libs.versions.toml）を参照する設定
-    versionCatalogs {
-        create("libs") {
-            from(files("gradle/libs.versions.toml"))
-        }
-    }
+    // gradle/libs.versions.toml はGradleが自動検出するため明示的な指定は不要
 }
 
 // プロジェクト名

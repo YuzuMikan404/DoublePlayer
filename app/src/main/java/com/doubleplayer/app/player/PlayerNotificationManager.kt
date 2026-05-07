@@ -150,10 +150,10 @@ class PlayerNotificationManager @Inject constructor(
                 buildActionPendingIntent(ACTION_EXIT, 4)
             )
             // MediaStyleを適用して音楽プレイヤー風の通知にする
-            .setStyle(
-                androidx.media.app.NotificationCompat.MediaStyle()
-                    // 通知に表示するアクションのインデックス（0〜3番目のボタン）
-                    .setShowActionsInCompactView(0, 1, 2)
+            // （androidx.media:mediaライブラリ不要のシンプル実装）
+            .setStyle(NotificationCompat.BigTextStyle()
+                .bigText("A: $trackAFileName
+B: $trackBFileName")
             )
             .build()
     }

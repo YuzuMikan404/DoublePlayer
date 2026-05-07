@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 // Hilt依存注入のインポート
-import com.doubleplayer.app.di.SettingsStore as SettingsStoreQualifier
+import com.doubleplayer.app.di.SettingsStore as SettingsStoreDataStoreQualifier
 import com.doubleplayer.app.schedule.ActiveDaysConfig
 import com.doubleplayer.app.schedule.ScheduleConfig
 import com.doubleplayer.app.schedule.TriggerConfig
@@ -38,7 +38,7 @@ import javax.inject.Singleton
 @Singleton
 class SettingsStore @Inject constructor(
     // Hilt Qualifierで区別した設定用DataStore
-    @SettingsStoreQualifier private val dataStore: DataStore<Preferences>
+    @SettingsStoreDataStoreQualifier private val dataStore: DataStore<Preferences>
 ) {
 
     // ========== DataStoreのキー定義 ==========

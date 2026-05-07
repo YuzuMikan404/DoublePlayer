@@ -299,9 +299,8 @@ class SettingsStore @Inject constructor(
             prefs[KEY_TRACK_B_LINKED_RATIO] = ratio
         }
     }
-}
 
-// ========== BackupManagerから呼ばれる個別保存メソッド ==========
+    // ========== BackupManagerから呼ばれる個別保存メソッド ==========
 
     /**
      * フェードイン秒数を個別保存するメソッド（BackupManagerのインポート時に使用する）

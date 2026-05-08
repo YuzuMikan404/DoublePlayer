@@ -8,10 +8,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-// Media3通知関連のインポート
+// 通知ビルダーのインポート
 import androidx.core.app.NotificationCompat
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.session.MediaSession
 // Material Iconsは通知では使えないためR.drawableを使用する
 import com.doubleplayer.app.MainActivity
 // Hilt依存注入のインポート

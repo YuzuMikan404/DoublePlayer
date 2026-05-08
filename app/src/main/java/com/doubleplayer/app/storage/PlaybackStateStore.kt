@@ -232,25 +232,19 @@ class PlaybackStateStore @Inject constructor(
      * @return PlaybackSnapshot（現在の全再生状態をまとめたデータクラス）
      */
     suspend fun getSnapshot(): PlaybackSnapshot {
-        // DataStoreの現在値を一度に読み込む
-        var snapshot = PlaybackSnapshot()
-        dataStore.data.map { prefs ->
-            PlaybackSnapshot(
-                lastPlayDate = prefs[KEY_LAST_PLAY_DATE] ?: "",
-                todayPlayedFlag = prefs[KEY_TODAY_PLAYED_FLAG] ?: false,
-                todayCompleteFlag = prefs[KEY_TODAY_COMPLETE_FLAG] ?: false,
-                trackACurrentFile = prefs[KEY_TRACK_A_CURRENT_FILE] ?: "",
-                trackAPositionMs = prefs[KEY_TRACK_A_POSITION_MS] ?: 0L,
-                trackAFileIndex = prefs[KEY_TRACK_A_FILE_INDEX] ?: 0,
-                trackBShuffleList = prefs[KEY_TRACK_B_SHUFFLE_LIST] ?: "",
-                trackBCurrentIndex = prefs[KEY_TRACK_B_CURRENT_INDEX] ?: 0
-            )
-        }.collect {
-            // 1回だけ収集して返す
-            snapshot = it
-            return@collect
-        }
-        return snapshot
+        // ★ dataStore.data.collect は Flow が完了するまでブロックし続けるため使えない。
+        //    dataStore.data.first() で1回だけ読み込んで即リターンする。
+        val prefs = dataStore.data.first()
+        return PlaybackSnapshot(
+            lastPlayDate      = prefs[KEY_LAST_PLAY_DATE] ?: "",
+            todayPlayedFlag   = prefs[KEY_TODAY_PLAYED_FLAG] ?: false,
+            todayCompleteFlag = prefs[KEY_TODAY_COMPLETE_FLAG] ?: false,
+            trackACurrentFile = prefs[KEY_TRACK_A_CURRENT_FILE] ?: "",
+            trackAPositionMs  = prefs[KEY_TRACK_A_POSITION_MS] ?: 0L,
+            trackAFileIndex   = prefs[KEY_TRACK_A_FILE_INDEX] ?: 0,
+            trackBShuffleList = prefs[KEY_TRACK_B_SHUFFLE_LIST] ?: "",
+            trackBCurrentIndex = prefs[KEY_TRACK_B_CURRENT_INDEX] ?: 0
+        )
     }
 }
 

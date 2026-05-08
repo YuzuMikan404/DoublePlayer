@@ -175,11 +175,35 @@ class PlayerService : Service() {
             trackBPlayer.setVolume(volume)
         }
         // SpeedControllerにプレイヤーを登録する
-        trackAPlayer.getExoPlayer()?.let { speedController.setTrackAPlayer(it) }
-        trackBPlayer.getExoPlayer()?.let { speedController.setTrackBPlayer(it) }
+        // ★ initialize()直後はExoPlayerが生成済みのため通常はnullにならないが、
+        //    万が一nullだった場合はリスナー経由で遅延登録して速度制御の無効化を防ぐ
+        val exoA = trackAPlayer.getExoPlayer()
+        if (exoA != null) {
+            speedController.setTrackAPlayer(exoA)
+        } else {
+            trackAPlayer.setOnReadyCallback { player -> speedController.setTrackAPlayer(player) }
+        }
+        val exoB = trackBPlayer.getExoPlayer()
+        if (exoB != null) {
+            speedController.setTrackBPlayer(exoB)
+        } else {
+            trackBPlayer.setOnReadyCallback { player -> speedController.setTrackBPlayer(player) }
+        }
         // EqualizerControllerを初期化する
-        equalizerController.initTrackA(trackAPlayer.getAudioSessionId())
-        equalizerController.initTrackB(trackBPlayer.getAudioSessionId())
+        // ★ getAudioSessionId()が0を返す場合（ExoPlayer準備前）はコールバックで遅延初期化し、
+        //    イコライザーが audioSessionId=0 で誤動作するのを防ぐ
+        val sessionA = trackAPlayer.getAudioSessionId()
+        if (sessionA != 0) {
+            equalizerController.initTrackA(sessionA)
+        } else {
+            trackAPlayer.setOnAudioSessionReadyCallback { id -> equalizerController.initTrackA(id) }
+        }
+        val sessionB = trackBPlayer.getAudioSessionId()
+        if (sessionB != 0) {
+            equalizerController.initTrackB(sessionB)
+        } else {
+            trackBPlayer.setOnAudioSessionReadyCallback { id -> equalizerController.initTrackB(id) }
+        }
         // トラックAのコールバックを設定する
         setupTrackACallbacks()
         // BroadcastReceiverを登録する

@@ -22,33 +22,43 @@ import kotlinx.coroutines.flow.asStateFlow
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
-// ファイル操作のインポート
-import java.io.File
 
 /**
  * TrackAPlayer - トラックA専用プレイヤー（メイン音声の再生を担当する）
  *
- * 仕様書セクション5「トラックA（メイン再生）」に基づいて実装する。
- * 指定フォルダ内の音声ファイルをファイル名昇順で順番に再生する。
- * 再生位置はPlayerServiceを通じてPlaybackStateStoreに保存する。
+ * 【修正】旧実装は File(path) でSDカードにアクセスしていたが、
+ * Android 10以降は外部ストレージへの直接Fileアクセスが禁止されている。
+ * SAF（Storage Access Framework）で取得した content:// URIを使い、
+ * MediaItem.fromUri(uri) で直接再生する方式に変更した。
+ * これにより内部ストレージ・SDカード・USBドライブを問わず再生できる。
  *
- * 対応フォーマット：MP3, AAC, WAV, FLAC, OGG
+ * フォルダ内のファイル一覧はDocumentFileで取得し、ファイル名昇順でソートする。
+ * 再生対象リストはUri+ファイル名のペア（AudioItem）で管理する。
  */
 @Singleton
 class TrackAPlayer @Inject constructor(
     @ApplicationContext private val context: Context  // アプリのコンテキスト
 ) {
 
+    /**
+     * AudioItem - 再生対象ファイルの情報（URI＋ファイル名）
+     * File()の代わりにURIを持つことでSAFアクセスに対応する
+     */
+    data class AudioItem(
+        val uri: Uri,       // SAF content:// URI（再生・アクセスに使用）
+        val fileName: String // 表示・ソート用ファイル名
+    )
+
     // ExoPlayerインスタンス（メインスレッドで初期化する必要がある）
     private var exoPlayer: ExoPlayer? = null
 
-    // 再生対象のファイルリスト（ファイル名昇順で並べる）
-    private var fileList: List<File> = emptyList()
+    // 再生対象のリスト（ファイル名昇順で並べたAudioItem）
+    private var fileList: List<AudioItem> = emptyList()
 
-    // 現在再生中のファイルインデックス（0始まり）
+    // 現在再生中のインデックス（0始まり）
     private var currentIndex: Int = 0
 
-    // トラックAの操作用コルーチンスコープ
+    // トラックAの操作用コルーチンスコープ（メインスレッドで動かす）
     private val playerScope = CoroutineScope(Dispatchers.Main)
 
     // 再生位置監視ジョブ
@@ -93,6 +103,17 @@ class TrackAPlayer @Inject constructor(
     // 全ファイル再生完了のコールバック
     var onAllCompletedCallback: (() -> Unit)? = null
 
+    // ★ ExoPlayerが生成された直後に呼ばれるコールバック（SpeedController登録用）
+    // PlayerService.onCreate()でgetExoPlayer()がnullを返した場合の安全策として使う
+    private var onReadyCallback: ((ExoPlayer) -> Unit)? = null
+
+    // ★ オーディオセッションIDが確定した直後に呼ばれるコールバック（Equalizer初期化用）
+    // ExoPlayer準備前にaudioSessionId=0が返った場合の安全策として使う
+    private var onAudioSessionReadyCallback: ((Int) -> Unit)? = null
+
+    // 対応する音声ファイルの拡張子一覧
+    private val SUPPORTED_EXTENSIONS = setOf("mp3", "aac", "wav", "flac", "ogg", "m4a")
+
     /**
      * ExoPlayerを初期化するメソッド
      * PlayerService.onCreate()から呼ぶ（メインスレッドで実行する必要がある）
@@ -104,42 +125,69 @@ class TrackAPlayer @Inject constructor(
         exoPlayer?.addListener(createPlayerListener())
         // 再生位置の監視を開始する
         startPositionMonitor()
+        // ★ ExoPlayer生成直後にコールバックを呼ぶ（SpeedController登録の遅延解消）
+        exoPlayer?.let { player ->
+            onReadyCallback?.invoke(player)
+            onReadyCallback = null
+        }
+        // ★ audioSessionIdはExoPlayer生成直後から取得可能なためここで確認する
+        val sessionId = exoPlayer?.audioSessionId ?: 0
+        if (sessionId != 0) {
+            onAudioSessionReadyCallback?.invoke(sessionId)
+            onAudioSessionReadyCallback = null
+        }
+        // audioSessionIdが0の場合はSTATE_READYイベントで再試行する（リスナー内で処理）
     }
 
     /**
      * 再生フォルダを設定してファイルリストを構築するメソッド
-     * フォルダ内の音声ファイルをファイル名昇順で並べる
+     * SAF URI文字列を受け取りDocumentFileでファイル一覧を取得する
      *
-     * @param folderPath 再生対象フォルダのパス
+     * @param folderUriString SAFで取得したフォルダのURI文字列（content://形式）
      */
-    fun setFolder(folderPath: String) {
-        // フォルダをFileオブジェクトに変換する
-        val folder = File(folderPath)
-        // フォルダが存在しない場合はリストを空にする
-        if (!folder.exists() || !folder.isDirectory) {
+    fun setFolder(folderUriString: String) {
+        // URIが空の場合はリストを空にする
+        if (folderUriString.isBlank()) {
             fileList = emptyList()
             _remainingCount.value = 0
             return
         }
-        // 対応する音声ファイルの拡張子リスト
-        val supportedExtensions = setOf("mp3", "aac", "wav", "flac", "ogg", "m4a")
-        // ファイルリストをファイル名昇順で取得する
-        fileList = folder.listFiles()
-            ?.filter { file ->
-                // ファイルであることを確認する
-                file.isFile &&
-                // 拡張子が対応フォーマットであることを確認する
-                file.extension.lowercase() in supportedExtensions
+        try {
+            // URI文字列をUriオブジェクトに変換する
+            val folderUri = Uri.parse(folderUriString)
+            // DocumentFileでSAFフォルダにアクセスする
+            val documentFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, folderUri)
+            // フォルダが存在しない・アクセスできない場合はリストを空にする
+            if (documentFile == null || !documentFile.exists() || !documentFile.canRead()) {
+                fileList = emptyList()
+                _remainingCount.value = 0
+                return
             }
-            ?.sortedBy { it.name }  // ファイル名昇順に並べる
-            ?: emptyList()
-        // 残り曲数を更新する
-        _remainingCount.value = fileList.size
+            // フォルダ内の音声ファイルを収集してファイル名昇順でソートする
+            val items = mutableListOf<AudioItem>()
+            documentFile.listFiles().forEach { entry ->
+                if (entry.isFile) {
+                    val name = entry.name ?: return@forEach
+                    val ext = name.substringAfterLast(".", "").lowercase()
+                    // 対応フォーマットのみ追加する
+                    if (ext in SUPPORTED_EXTENSIONS) {
+                        items.add(AudioItem(uri = entry.uri, fileName = name))
+                    }
+                }
+            }
+            // ファイル名昇順でソートする（仕様書セクション5）
+            fileList = items.sortedBy { it.fileName.lowercase() }
+            // 残り曲数を更新する
+            _remainingCount.value = fileList.size
+        } catch (e: Exception) {
+            // アクセスエラーの場合はリストを空にする
+            fileList = emptyList()
+            _remainingCount.value = 0
+        }
     }
 
     /**
      * 指定したインデックスから再生を開始するメソッド
-     * 最初の起動時または再開時に使用する
      *
      * @param index 再生を開始するファイルインデックス（デフォルトは0）
      * @param positionMs 再生開始位置（ミリ秒、デフォルトは0）
@@ -165,9 +213,7 @@ class TrackAPlayer @Inject constructor(
      * 再生を一時停止するメソッド
      */
     fun pause() {
-        // ExoPlayerを一時停止する
         exoPlayer?.pause()
-        // 再生中フラグを更新する
         _isPlaying.value = false
     }
 
@@ -175,20 +221,15 @@ class TrackAPlayer @Inject constructor(
      * 一時停止中の再生を再開するメソッド
      */
     fun resume() {
-        // ExoPlayerの再生を再開する
         exoPlayer?.play()
-        // 再生中フラグを更新する
         _isPlaying.value = true
     }
 
     /**
      * 再生を停止するメソッド
-     * 位置をリセットせずに停止する（resume()で続きから再生できる）
      */
     fun stop() {
-        // ExoPlayerを停止する
         exoPlayer?.stop()
-        // 再生中フラグを更新する
         _isPlaying.value = false
     }
 
@@ -196,7 +237,6 @@ class TrackAPlayer @Inject constructor(
      * 次のファイルへスキップするメソッド
      */
     fun skipToNext() {
-        // 次のインデックスに移動する
         if (currentIndex < fileList.size - 1) {
             currentIndex++
             nearEndNotified = false
@@ -204,7 +244,6 @@ class TrackAPlayer @Inject constructor(
             exoPlayer?.play()
             _isPlaying.value = true
         } else {
-            // 最後のファイルを超えた場合は全完了とする
             handleAllCompleted()
         }
     }
@@ -213,7 +252,6 @@ class TrackAPlayer @Inject constructor(
      * 前のファイルへ戻るメソッド
      */
     fun skipToPrevious() {
-        // 前のインデックスに移動する（先頭なら先頭に留まる）
         if (currentIndex > 0) {
             currentIndex--
         }
@@ -225,73 +263,92 @@ class TrackAPlayer @Inject constructor(
 
     /**
      * 音量を設定するメソッド
-     * FadeControllerから直接呼ばれる
+     * ★ メインスレッドから呼ぶこと（ExoPlayerの制約）
      *
      * @param volume 設定する音量（0.0f〜1.0f）
      */
     fun setVolume(volume: Float) {
-        // ExoPlayerの音量を設定する
         exoPlayer?.volume = volume.coerceIn(0f, 1f)
     }
 
     /**
      * ExoPlayerのオーディオセッションIDを取得するメソッド
-     * EqualizerControllerの初期化に使用する
-     *
-     * @return オーディオセッションID（未初期化の場合は0）
      */
     fun getAudioSessionId(): Int = exoPlayer?.audioSessionId ?: 0
 
     /**
      * ExoPlayerインスタンスを取得するメソッド
-     * SpeedControllerの初期化に使用する
-     *
-     * @return ExoPlayerインスタンス（未初期化の場合はnull）
      */
     fun getExoPlayer(): ExoPlayer? = exoPlayer
 
     /**
-     * 現在のファイルインデックスを取得するメソッド
+     * ExoPlayer生成直後に呼ばれるコールバックを登録するメソッド
+     * ★ PlayerService.onCreate()でgetExoPlayer()がnullを返した場合の安全策
      *
-     * @return 現在のファイルインデックス
+     * @param callback ExoPlayerインスタンスを受け取るコールバック
+     */
+    fun setOnReadyCallback(callback: (ExoPlayer) -> Unit) {
+        // initialize()が呼ばれていれば即座に呼ぶ、まだなら保持する
+        val player = exoPlayer
+        if (player != null) {
+            callback(player)
+        } else {
+            onReadyCallback = callback
+        }
+    }
+
+    /**
+     * オーディオセッションIDが確定したときに呼ばれるコールバックを登録するメソッド
+     * ★ PlayerService.onCreate()でgetAudioSessionId()が0を返した場合の安全策
+     *
+     * @param callback オーディオセッションIDを受け取るコールバック
+     */
+    fun setOnAudioSessionReadyCallback(callback: (Int) -> Unit) {
+        val sessionId = exoPlayer?.audioSessionId ?: 0
+        if (sessionId != 0) {
+            // すでに取得可能なら即座に呼ぶ
+            callback(sessionId)
+        } else {
+            onAudioSessionReadyCallback = callback
+        }
+    }
+
+    /**
+     * 現在のファイルインデックスを取得するメソッド
      */
     fun getCurrentIndex(): Int = currentIndex
 
     /**
      * 現在の再生位置（ミリ秒）を取得するメソッド
-     *
-     * @return 現在の再生位置（ミリ秒）
      */
     fun getCurrentPositionMs(): Long = exoPlayer?.currentPosition ?: 0L
 
     /**
-     * 現在再生中のファイルパスを取得するメソッド
-     *
-     * @return 現在のファイルパス（ファイルが存在しない場合は空文字）
+     * 現在再生中のファイルURIを文字列で取得するメソッド
+     * （旧API互換: PlaybackStateStoreへの保存用）
      */
-    fun getCurrentFilePath(): String = fileList.getOrNull(currentIndex)?.absolutePath ?: ""
+    fun getCurrentFilePath(): String = fileList.getOrNull(currentIndex)?.uri?.toString() ?: ""
 
     /**
      * ファイルリストのサイズを取得するメソッド
-     *
-     * @return ファイルリストのサイズ
      */
     fun getFileListSize(): Int = fileList.size
 
     /**
      * 現在のファイルを読み込んでExoPlayerにセットするプライベートメソッド
+     * ★ content:// URIを直接MediaItemに渡すことでSAFアクセスに対応する
      *
      * @param positionMs 再生開始位置（ミリ秒）
      */
     private fun loadCurrentFile(positionMs: Long) {
-        // 現在のファイルを取得する
-        val currentFile = fileList.getOrNull(currentIndex) ?: return
+        // 現在のAudioItemを取得する
+        val item = fileList.getOrNull(currentIndex) ?: return
         // ファイル名をUIに反映する
-        _currentFileName.value = currentFile.name
-        // 残り曲数を更新する（現在のファイルを含む残り数）
+        _currentFileName.value = item.fileName
+        // 残り曲数を更新する
         _remainingCount.value = fileList.size - currentIndex
-        // MediaItemを生成する
-        val mediaItem = MediaItem.fromUri(Uri.fromFile(currentFile))
+        // ★ content:// URIを直接使ってMediaItemを生成する（File()不使用）
+        val mediaItem = MediaItem.fromUri(item.uri)
         // ExoPlayerにMediaItemをセットする
         exoPlayer?.setMediaItem(mediaItem)
         // 再生の準備をする
@@ -304,100 +361,86 @@ class TrackAPlayer @Inject constructor(
 
     /**
      * ExoPlayerのリスナーを作成するプライベートメソッド
-     * 再生終了・エラーなどのイベントを処理する
-     *
-     * @return Playerのリスナーオブジェクト
      */
     private fun createPlayerListener(): Player.Listener {
         return object : Player.Listener {
-            // 再生状態が変化したときに呼ばれる
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
                     // 再生が終了したとき
                     Player.STATE_ENDED -> {
-                        // トラック終了コールバックを呼ぶ
                         onTrackEndCallback?.invoke()
-                        // 次のファイルへ進む
                         handleTrackEnd()
                     }
                     // 再生準備完了のとき
                     Player.STATE_READY -> {
-                        // 総再生時間を更新する
                         _durationMs.value = exoPlayer?.duration ?: 0L
+                        // ★ STATE_READYでaudioSessionIdが確定する端末への対応
+                        // initialize()時にaudioSessionId=0だった場合、ここで再試行する
+                        val pendingCallback = onAudioSessionReadyCallback
+                        if (pendingCallback != null) {
+                            val sessionId = exoPlayer?.audioSessionId ?: 0
+                            if (sessionId != 0) {
+                                onAudioSessionReadyCallback = null
+                                pendingCallback(sessionId)
+                            }
+                        }
                     }
-                    else -> { /* その他の状態は無視する */ }
+                    else -> {}
                 }
             }
 
-            // 再生エラーが発生したときに呼ばれる
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                // 再生エラー時は仕様書「再生エラー時は自動で次のファイルへスキップ」に従う
+                // 再生エラー時は次のファイルへスキップする（仕様書セクション8）
                 handleTrackEnd()
             }
         }
     }
 
     /**
-     * 1ファイルの再生終了時の処理を行うプライベートメソッド
-     * 次のファイルへ進む、またはすべて完了の処理を行う
+     * 1ファイルの再生終了時の処理
      */
     private fun handleTrackEnd() {
-        // 次のファイルが存在するか確認する
         if (currentIndex < fileList.size - 1) {
-            // 次のファイルへ進む
             currentIndex++
             nearEndNotified = false
             loadCurrentFile(0L)
             exoPlayer?.play()
         } else {
-            // 全ファイルを再生し終えた
             handleAllCompleted()
         }
     }
 
     /**
-     * 全ファイル再生完了時の処理を行うプライベートメソッド
+     * 全ファイル再生完了時の処理
      */
     private fun handleAllCompleted() {
-        // 完了フラグを立てる
         _isCompleted.value = true
-        // 再生中フラグをオフにする
         _isPlaying.value = false
-        // 残り曲数を0にする
         _remainingCount.value = 0
-        // 全完了コールバックを呼ぶ
         onAllCompletedCallback?.invoke()
     }
 
     /**
      * 再生位置を定期的に監視するコルーチンを開始するプライベートメソッド
-     * UIへの再生位置更新とトラックA終了N秒前の検知を行う
      */
     private fun startPositionMonitor() {
-        // 既存の監視ジョブをキャンセルする
         positionMonitorJob?.cancel()
-        // 500msごとに再生位置を更新する
         positionMonitorJob = playerScope.launch {
             while (isActive) {
-                // 再生中のみ処理する
                 if (_isPlaying.value) {
                     val position = exoPlayer?.currentPosition ?: 0L
                     val duration = exoPlayer?.duration ?: 0L
-                    // 再生位置を更新する
                     _currentPositionMs.value = position
-                    // 終了前N秒になったか確認する（未通知の場合のみ）
+                    // 終了前N秒になったか確認する
                     if (!nearEndNotified && duration > 0L) {
                         val remainingMs = duration - position
                         val thresholdMs = (fadeOutBeforeEndSeconds * 1000).toLong()
                         if (remainingMs in 0L..thresholdMs) {
-                            // 終了前通知フラグを立てる
                             nearEndNotified = true
-                            // フェードアウト開始コールバックを呼ぶ
                             onNearEndCallback?.invoke()
                         }
                     }
                 }
-                // 500ms待機する
                 delay(500L)
             }
         }
@@ -405,19 +448,17 @@ class TrackAPlayer @Inject constructor(
 
     /**
      * リソースを解放するメソッド
-     * PlayerServiceのonDestroy()から呼ぶ
      */
     fun release() {
-        // 再生位置監視を停止する
         positionMonitorJob?.cancel()
-        // コルーチンスコープをキャンセルする
         playerScope.cancel()
-        // ExoPlayerを解放する
         exoPlayer?.release()
         exoPlayer = null
-        // コールバックをクリアする
         onNearEndCallback = null
         onTrackEndCallback = null
         onAllCompletedCallback = null
+        // ★ 遅延コールバックもクリアする
+        onReadyCallback = null
+        onAudioSessionReadyCallback = null
     }
 }

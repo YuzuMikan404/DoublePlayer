@@ -3,6 +3,8 @@ package com.doubleplayer.app.player
 // Media3のプレイヤー制御関連インポート
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.exoplayer.ExoPlayer
+// メインスレッド検証アノテーションのインポート
+import androidx.annotation.MainThread
 // Hilt依存注入のインポート
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -13,6 +15,10 @@ import javax.inject.Singleton
  * 仕様書セクション2「プレイヤー画面」に基づいて実装する。
  * 再生速度は0.5x〜2.0xの範囲で調整できる。
  * トラックAとトラックBに同じ速度を適用する（BGMと音声の同期を保つため）。
+ *
+ * ★ ExoPlayerのplaybackParametersはメインスレッドからのみ操作可能なため、
+ *    setSpeed()・setTrackAPlayer()・setTrackBPlayer()はすべてメインスレッドから呼ぶこと。
+ *    PlayerServiceのserviceScopeはDispatchers.Mainで動作するため問題ない。
  */
 @Singleton
 class SpeedController @Inject constructor() {
@@ -38,9 +44,11 @@ class SpeedController @Inject constructor() {
     /**
      * トラックAのExoPlayerを設定するメソッド
      * TrackAPlayerを初期化した後に呼ぶ
+     * ★ メインスレッドから呼ぶこと（ExoPlayerの制約）
      *
      * @param player トラックA用のExoPlayerインスタンス
      */
+    @MainThread
     fun setTrackAPlayer(player: ExoPlayer) {
         // プレイヤーを保持する
         trackAPlayer = player
@@ -51,9 +59,11 @@ class SpeedController @Inject constructor() {
     /**
      * トラックBのExoPlayerを設定するメソッド
      * TrackBPlayerを初期化した後に呼ぶ
+     * ★ メインスレッドから呼ぶこと（ExoPlayerの制約）
      *
      * @param player トラックB用のExoPlayerインスタンス
      */
+    @MainThread
     fun setTrackBPlayer(player: ExoPlayer) {
         // プレイヤーを保持する
         trackBPlayer = player
@@ -64,9 +74,11 @@ class SpeedController @Inject constructor() {
     /**
      * 再生速度を設定するメソッド
      * トラックA・Bの両方に同時に適用する
+     * ★ メインスレッドから呼ぶこと（ExoPlayerの制約）
      *
      * @param speed 設定する再生速度（0.5f〜2.0f）
      */
+    @MainThread
     fun setSpeed(speed: Float) {
         // 速度を有効範囲内にクランプする
         val clampedSpeed = speed.coerceIn(minSpeed, maxSpeed)
@@ -88,6 +100,7 @@ class SpeedController @Inject constructor() {
     /**
      * 速度をデフォルト値（1.0x）にリセットするメソッド
      */
+    @MainThread
     fun resetToDefault() {
         // デフォルト速度を設定する
         setSpeed(defaultSpeed)
@@ -95,11 +108,12 @@ class SpeedController @Inject constructor() {
 
     /**
      * 指定したExoPlayerに再生速度を適用するプライベートメソッド
-     * PlaybackParametersオブジェクトを生成してExoPlayerに渡す
+     * ★ ExoPlayerの制約上、メインスレッドから呼ばれることを前提とする
      *
      * @param player 速度を適用するExoPlayerインスタンス
      * @param speed 設定する再生速度
      */
+    @MainThread
     private fun applySpeedToPlayer(player: ExoPlayer, speed: Float) {
         // PlaybackParametersを生成して速度を設定する
         // pitchは1.0fのまま（速度変更でピッチが変わらないようにする）

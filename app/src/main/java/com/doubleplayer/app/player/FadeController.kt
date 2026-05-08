@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 // Hilt依存注入のインポート
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -15,14 +16,10 @@ import javax.inject.Singleton
 /**
  * FadeController - トラックBのフェードイン/アウトを制御するクラス
  *
- * 仕様書セクション5「フェード制御」に基づいて実装する。
- * トラックAの状態に連動してトラックBの音量を滑らかに変化させる。
- *
- * フェード動作一覧：
- * - トラックA開始       → トラックBをフェードイン（fadeInSeconds秒）
- * - トラックA一時停止   → トラックBをフェードアウト（fadeOutSeconds秒）
- * - トラックA再開       → トラックBをフェードイン
- * - トラックA終了N秒前  → トラックBをフェードアウト開始（fadeOutBeforeEndSeconds）
+ * 【修正】ExoPlayerはメインスレッドからしかアクセスできないため、
+ * フェード計算はDefaultスレッドで行い、コールバック呼び出しは
+ * withContext(Dispatchers.Main)でメインスレッドに切り替えて実行する。
+ * これにより「Player is accessed on the wrong thread」クラッシュを防ぐ。
  */
 @Singleton
 class FadeController @Inject constructor() {
@@ -33,20 +30,18 @@ class FadeController @Inject constructor() {
     // フェードアウト処理のジョブ（進行中のフェードをキャンセルするために保持する）
     private var fadeOutJob: Job? = null
 
-    // フェード処理用のコルーチンスコープ（Dispatchers.Defaultで実行する）
+    // フェード計算用コルーチンスコープ（Defaultスレッドで時間計算する）
     private val fadeScope = CoroutineScope(Dispatchers.Default)
 
-    // 現在のトラックBの実際の音量（0.0f〜1.0f）
+    // 現在のトラックBの音量（0.0f〜1.0f）
     private var currentVolume: Float = 0f
 
-    // 音量更新コールバック（PlayerServiceから設定する）
+    // 音量更新コールバック（ExoPlayerへの反映はメインスレッドで行う必要がある）
     private var onVolumeChanged: ((Float) -> Unit)? = null
 
     /**
      * 音量更新コールバックを設定するメソッド
      * PlayerServiceがこのコールバックでExoPlayerの音量を更新する
-     *
-     * @param callback 音量が変化したときに呼ばれるコールバック
      */
     fun setOnVolumeChangedListener(callback: (Float) -> Unit) {
         // コールバックを保持する
@@ -64,7 +59,7 @@ class FadeController @Inject constructor() {
         // 進行中のフェード処理をすべてキャンセルする
         cancelAllFades()
 
-        // フェードインジョブを起動する
+        // Defaultスレッドで計算し、Mainスレッドでコールバックを呼ぶ
         fadeInJob = fadeScope.launch {
             // フェードの更新間隔（ミリ秒）
             val intervalMs = 50L
@@ -79,18 +74,23 @@ class FadeController @Inject constructor() {
             repeat(totalSteps) { step ->
                 // コルーチンがキャンセルされていたら中断する
                 if (!isActive) return@launch
-                // 現在の音量を計算する（計算誤差を防ぐため直接計算する）
+                // 現在の音量を計算する
                 val newVolume = (startVolume + stepSize * (step + 1)).coerceIn(0f, targetVolume)
                 // 現在音量を更新する
                 currentVolume = newVolume
-                // コールバックで音量変化を通知する
-                onVolumeChanged?.invoke(currentVolume)
+                // ★ ExoPlayerへの音量設定は必ずメインスレッドで行う
+                withContext(Dispatchers.Main) {
+                    onVolumeChanged?.invoke(currentVolume)
+                }
                 // 次のステップまで待機する
                 delay(intervalMs)
             }
             // 最終的に目標音量に正確に合わせる
             currentVolume = targetVolume
-            onVolumeChanged?.invoke(currentVolume)
+            // ★ 最終値もメインスレッドで設定する
+            withContext(Dispatchers.Main) {
+                onVolumeChanged?.invoke(currentVolume)
+            }
         }
     }
 
@@ -111,7 +111,7 @@ class FadeController @Inject constructor() {
             return
         }
 
-        // フェードアウトジョブを起動する
+        // Defaultスレッドで計算し、Mainスレッドでコールバックを呼ぶ
         fadeOutJob = fadeScope.launch {
             // フェードの更新間隔（ミリ秒）
             val intervalMs = 50L
@@ -130,22 +130,29 @@ class FadeController @Inject constructor() {
                 val newVolume = (startVolume - stepSize * (step + 1)).coerceIn(0f, startVolume)
                 // 現在音量を更新する
                 currentVolume = newVolume
-                // コールバックで音量変化を通知する
-                onVolumeChanged?.invoke(currentVolume)
+                // ★ ExoPlayerへの音量設定は必ずメインスレッドで行う
+                withContext(Dispatchers.Main) {
+                    onVolumeChanged?.invoke(currentVolume)
+                }
                 // 次のステップまで待機する
                 delay(intervalMs)
             }
             // 最終的に音量を0に正確に合わせる
             currentVolume = 0f
-            onVolumeChanged?.invoke(0f)
-            // 完了コールバックを呼ぶ
-            onComplete?.invoke()
+            // ★ 最終値もメインスレッドで設定する
+            withContext(Dispatchers.Main) {
+                onVolumeChanged?.invoke(0f)
+            }
+            // ★ 完了コールバックもメインスレッドで呼ぶ（PlayerServiceのBinder操作のため）
+            withContext(Dispatchers.Main) {
+                onComplete?.invoke()
+            }
         }
     }
 
     /**
      * 現在の音量を即座に設定するメソッド
-     * フェードなしで音量を変更したい場合に使用する
+     * ★ このメソッドはメインスレッドから呼ぶこと（PlayerServiceから呼ぶため問題なし）
      *
      * @param volume 設定する音量（0.0f〜1.0f）
      */
@@ -154,20 +161,17 @@ class FadeController @Inject constructor() {
         cancelAllFades()
         // 音量を即座に設定する
         currentVolume = volume.coerceIn(0f, 1f)
-        // コールバックで通知する
+        // コールバックで通知する（呼び出し元がメインスレッドのため直接呼ぶ）
         onVolumeChanged?.invoke(currentVolume)
     }
 
     /**
      * 現在の音量を取得するメソッド
-     *
-     * @return 現在の音量（0.0f〜1.0f）
      */
     fun getCurrentVolume(): Float = currentVolume
 
     /**
      * 進行中のフェード処理をすべてキャンセルするメソッド
-     * 新しいフェードを開始する前に呼ぶことで競合を防ぐ
      */
     fun cancelAllFades() {
         // フェードインジョブをキャンセルする
@@ -180,7 +184,6 @@ class FadeController @Inject constructor() {
 
     /**
      * リソースを解放するメソッド
-     * PlayerServiceのonDestroy()から呼ぶ
      */
     fun release() {
         // すべてのフェード処理を停止する

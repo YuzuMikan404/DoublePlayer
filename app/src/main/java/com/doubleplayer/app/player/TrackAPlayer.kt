@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+// デバッグログのインポート
+import com.doubleplayer.app.debug.DebugLogger
 
 /**
  * TrackAPlayer - トラックA専用プレイヤー（メイン音声の再生を担当する）
@@ -37,7 +39,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class TrackAPlayer @Inject constructor(
-    @ApplicationContext private val context: Context  // アプリのコンテキスト
+    @ApplicationContext private val context: Context,  // アプリのコンテキスト
+    private val debugLogger: DebugLogger               // デバッグログ記録用
 ) {
 
     /**
@@ -179,6 +182,10 @@ class TrackAPlayer @Inject constructor(
             fileList = items.sortedBy { it.fileName.lowercase() }
             // 残り曲数を更新する
             _remainingCount.value = fileList.size
+            // ★ スキャン完了ログを記録する
+            debugLogger.log(DebugLogger.Category.FILE,
+                "TrackA スキャン完了: ${fileList.size}件 フォルダ=${folderUriString.takeLast(40)}"
+            )
         } catch (e: Exception) {
             // アクセスエラーの場合はリストを空にする
             fileList = emptyList()
@@ -347,6 +354,10 @@ class TrackAPlayer @Inject constructor(
         _currentFileName.value = item.fileName
         // 残り曲数を更新する
         _remainingCount.value = fileList.size - currentIndex
+        // ★ 曲ロードログを記録する
+        debugLogger.log(DebugLogger.Category.PLAYBACK,
+            "TrackA ロード [${currentIndex + 1}/${fileList.size}]: ${item.fileName} pos=${positionMs}ms"
+        )
         // ★ content:// URIを直接使ってMediaItemを生成する（File()不使用）
         val mediaItem = MediaItem.fromUri(item.uri)
         // ExoPlayerにMediaItemをセットする
@@ -390,6 +401,11 @@ class TrackAPlayer @Inject constructor(
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                // ★ 再生エラーをDebugLoggerに記録する
+                debugLogger.error(DebugLogger.Category.ERROR,
+                    "TrackA 再生エラー [${currentIndex}]: ${fileList.getOrNull(currentIndex)?.fileName} → ${error.message}",
+                    error
+                )
                 // 再生エラー時は次のファイルへスキップする（仕様書セクション8）
                 handleTrackEnd()
             }

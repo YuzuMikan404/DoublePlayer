@@ -13,6 +13,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,6 +22,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+// デバッグログのインポート
+import com.doubleplayer.app.debug.DebugLogger
 
 /**
  * TrackBPlayer - トラックB専用プレイヤー（BGMのシャッフル再生を担当する）
@@ -34,7 +38,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class TrackBPlayer @Inject constructor(
-    @ApplicationContext private val context: Context  // アプリのコンテキスト
+    @ApplicationContext private val context: Context,  // アプリのコンテキスト
+    private val debugLogger: DebugLogger               // デバッグログ記録用
 ) {
 
     /**
@@ -105,71 +110,115 @@ class TrackBPlayer @Inject constructor(
 
     /**
      * 再生フォルダを設定してシャッフルリストを構築するメソッド
-     * サブフォルダも含めて全音声ファイルをSAF経由で収集してシャッフルする
+     * ★【ANR修正】DocumentFile.listFiles()は数千ファイルあるとメインスレッドをブロックするため、
+     *   ファイルスキャン処理をIOスレッドで行い、結果だけMainスレッドに戻す方式に変更した。
      *
      * @param folderUriString SAFで取得したフォルダのURI文字列（content://形式）
      * @param savedShuffleList 保存済みのシャッフルリスト（URI文字列リスト、nullは新規生成）
      * @param savedIndex 保存済みのインデックス（デフォルトは0）
+     * @param onReady スキャン完了後に呼ばれるコールバック（再生開始タイミングの同期用）
      */
     fun setFolder(
         folderUriString: String,
         savedShuffleList: List<String>? = null,
-        savedIndex: Int = 0
+        savedIndex: Int = 0,
+        onReady: (() -> Unit)? = null
     ) {
-        // URIが空の場合はリストを空にする
+        // URIが空の場合はリストを空にしてコールバックを呼ぶ
         if (folderUriString.isBlank()) {
             shuffledList = mutableListOf()
             _remainingCount.value = 0
             _shuffleListNames.value = emptyList()
+            onReady?.invoke()
             return
         }
-        try {
-            // URI文字列をUriオブジェクトに変換する
-            val folderUri = Uri.parse(folderUriString)
-            // DocumentFileでSAFフォルダにアクセスする
-            val documentFile = DocumentFile.fromTreeUri(context, folderUri)
-            // フォルダが存在しない・アクセスできない場合はリストを空にする
-            if (documentFile == null || !documentFile.exists() || !documentFile.canRead()) {
-                shuffledList = mutableListOf()
-                _remainingCount.value = 0
-                _shuffleListNames.value = emptyList()
-                return
+        // ★ IOスレッドでファイルスキャンを実行してメインスレッドのブロックを防ぐ
+        playerScope.launch {
+            try {
+                // URI文字列をUriオブジェクトに変換する（IOスレッド）
+                val folderUri = Uri.parse(folderUriString)
+                val newList: MutableList<AudioItem>
+                val newIndex: Int
+
+                // 保存済みシャッフルリストがある場合はURI文字列から復元する（重いスキャン不要）
+                if (savedShuffleList != null && savedShuffleList.isNotEmpty()) {
+                    // URI→AudioItem変換はIOスレッドで実行する
+                    val restored = withContext(Dispatchers.IO) {
+                        savedShuffleList.mapNotNull { uriString ->
+                            try {
+                                val uri = Uri.parse(uriString)
+                                val doc = DocumentFile.fromSingleUri(context, uri)
+                                val name = doc?.name ?: uriString.substringAfterLast("/")
+                                AudioItem(uri = uri, fileName = name)
+                            } catch (e: Exception) { null }
+                        }.toMutableList()
+                    }
+                    newList = restored
+                    newIndex = savedIndex.coerceIn(0, (newList.size - 1).coerceAtLeast(0))
+                } else {
+                    // ★ 新規スキャンはIOスレッドで実行する（数千ファイルでもメインスレッドをブロックしない）
+                    val scanned = withContext(Dispatchers.IO) {
+                        val documentFile = DocumentFile.fromTreeUri(context, folderUri)
+                        if (documentFile == null || !documentFile.exists() || !documentFile.canRead()) {
+                            mutableListOf()
+                        } else {
+                            collectAllAudioFiles(documentFile).shuffled().toMutableList()
+                        }
+                    }
+                    newList = scanned
+                    newIndex = 0
+                }
+
+                // ★ StateFlowの更新とシャッフルリストへの代入はメインスレッドで行う
+                withContext(Dispatchers.Main) {
+                    shuffledList = newList
+                    currentIndex = newIndex
+                    // UIにシャッフルリストのファイル名を反映する
+                    _shuffleListNames.value = newList.map { it.fileName }
+                    // 残り曲数を更新する
+                    _remainingCount.value = (newList.size - newIndex).coerceAtLeast(0)
+                    // ★ スキャン完了ログを記録する
+                    debugLogger.log(DebugLogger.Category.FILE,
+                        "TrackB スキャン完了: ${newList.size}件 idx=$newIndex フォルダ=${folderUriString.takeLast(40)}"
+                    )
+                    // スキャン完了コールバックを呼ぶ（再生開始などの後続処理を行う）
+                    onReady?.invoke()
+                }
+            } catch (e: Exception) {
+                // エラー時もメインスレッドでリセットしてコールバックを呼ぶ
+                withContext(Dispatchers.Main) {
+                    shuffledList = mutableListOf()
+                    _remainingCount.value = 0
+                    _shuffleListNames.value = emptyList()
+                    onReady?.invoke()
+                }
             }
-            // 保存済みシャッフルリストがある場合はURI文字列から復元する
-            if (savedShuffleList != null && savedShuffleList.isNotEmpty()) {
-                shuffledList = savedShuffleList.mapNotNull { uriString ->
-                    // URI文字列からAudioItemを復元する（存在確認は省略して高速化）
-                    try {
-                        val uri = Uri.parse(uriString)
-                        val doc = DocumentFile.fromSingleUri(context, uri)
-                        val name = doc?.name ?: uriString.substringAfterLast("/")
-                        AudioItem(uri = uri, fileName = name)
-                    } catch (e: Exception) { null }
-                }.toMutableList()
-                currentIndex = savedIndex.coerceIn(0, (shuffledList.size - 1).coerceAtLeast(0))
-            } else {
-                // 新しいシャッフルリストを生成する（サブフォルダを含めて再帰的に収集）
-                val allItems = collectAllAudioFiles(documentFile)
-                shuffledList = allItems.shuffled().toMutableList()
-                currentIndex = 0
-            }
-            // UIにシャッフルリストのファイル名を反映する
-            _shuffleListNames.value = shuffledList.map { it.fileName }
-            // 残り曲数を更新する
-            _remainingCount.value = (shuffledList.size - currentIndex).coerceAtLeast(0)
-        } catch (e: Exception) {
-            shuffledList = mutableListOf()
-            _remainingCount.value = 0
-            _shuffleListNames.value = emptyList()
         }
     }
 
     /**
-     * 再生を開始するメソッド
+     * 再生を開始するメソッド（新規再生・リスト設定後に呼ぶ）
      */
     fun play() {
         if (shuffledList.isEmpty()) return
         loadCurrentFile()
+        exoPlayer?.play()
+        _isPlaying.value = true
+    }
+
+    /**
+     * 一時停止中の再生を再開するメソッド
+     * ★【修正】play()はloadCurrentFile()を呼んでsetMediaItem/prepareが走るため、
+     *   一時停止後の再開にはこのresumeメソッドを使い、ExoPlayerのplay()だけ呼ぶ。
+     *   これによりトラックAのオーディオフォーカスを奪わない。
+     */
+    fun resume() {
+        // リストが空または停止中（ファイル未ロード）の場合は通常のplay()にフォールバック
+        if (shuffledList.isEmpty()) return
+        if (exoPlayer?.playbackState == androidx.media3.common.Player.STATE_IDLE) {
+            // まだ一度も再生していない場合はloadCurrentFileが必要
+            loadCurrentFile()
+        }
         exoPlayer?.play()
         _isPlaying.value = true
     }
@@ -285,6 +334,10 @@ class TrackBPlayer @Inject constructor(
         val item = shuffledList.getOrNull(currentIndex) ?: return
         _currentFileName.value = item.fileName
         _remainingCount.value = (shuffledList.size - currentIndex).coerceAtLeast(0)
+        // ★ 曲ロードログを記録する
+        debugLogger.log(DebugLogger.Category.PLAYBACK,
+            "TrackB ロード [${currentIndex + 1}/${shuffledList.size}]: ${item.fileName}"
+        )
         // ★ content:// URIを直接使ってMediaItemを生成する
         val mediaItem = MediaItem.fromUri(item.uri)
         exoPlayer?.setMediaItem(mediaItem)
@@ -315,6 +368,11 @@ class TrackBPlayer @Inject constructor(
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                // ★ 再生エラーをDebugLoggerに記録する
+                debugLogger.error(DebugLogger.Category.ERROR,
+                    "TrackB 再生エラー [${currentIndex}]: ${shuffledList.getOrNull(currentIndex)?.fileName} → ${error.message}",
+                    error
+                )
                 // 再生エラー時は次のファイルへスキップする
                 handleTrackEnd()
             }

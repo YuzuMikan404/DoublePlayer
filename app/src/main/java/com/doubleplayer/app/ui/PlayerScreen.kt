@@ -78,12 +78,16 @@ fun PlayerScreen(
 
     // ========== サービスのバインド管理 ==========
 
-    // 画面表示中はサービスにバインドし、非表示時にアンバインドする
-    DisposableEffect(Unit) {
+    // ★【設定遷移で再生が止まるバグ修正】
+    // 旧実装では DisposableEffect で onDispose 時に unbindService() を呼んでいたが、
+    // 設定タブに切り替えるとPlayerScreenが再コンポーズされて onDispose が発火し、
+    // サービスとのバインドが切れて通知・音量制御が正常に動かなくなっていた。
+    // ★ バインドはアプリ起動時に1回だけ行い、ViewModelのonCleared()で解除する。
+    //   (ViewModelはNavigation Compose のバックスタックと連動してライフサイクルを管理するため
+    //    アプリ全体で共有される HiltViewModel を使う場合は Activity スコープが維持される)
+    // ★ 画面表示のたびに再バインドを試みる（サービス未起動時の安全策）
+    LaunchedEffect(Unit) {
         viewModel.bindService()
-        onDispose {
-            viewModel.unbindService()
-        }
     }
 
     // ========== UI本体 ==========

@@ -182,9 +182,13 @@ class PlayerViewModel @Inject constructor(
      */
     private fun observeServiceState() {
         val service = playerService ?: return
-        // 再生状態（isPlaying）を監視する
+        // ★【isPlayingボタンアイコン修正】
+        // 旧実装は trackAPlayer.isPlaying のみを監視していたため、
+        // PlayerService.stopPlayback() や pausePlayback() で _isPlaying を false にしても
+        // UIのボタンアイコンが更新されない場合があった。
+        // PlayerService 自体の isPlaying（_isPlaying StateFlow）を監視するよう変更した。
         viewModelScope.launch {
-            service.trackAPlayer.isPlaying.collectLatest { _isPlaying.value = it }
+            service.isPlaying.collectLatest { _isPlaying.value = it }
         }
         // トラックAのファイル名を監視する
         viewModelScope.launch {

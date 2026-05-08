@@ -20,6 +20,8 @@ import kotlinx.coroutines.launch
 // Hilt依存注入のインポート
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+// デバッグログのインポート
+import com.doubleplayer.app.debug.DebugLogger
 
 /**
  * PlayerService - 2トラック再生を管理するForegroundService（再生エンジン本体）
@@ -58,6 +60,9 @@ class PlayerService : Service() {
 
     // 通知管理
     @Inject lateinit var notificationManager: PlayerNotificationManager
+
+    // デバッグログ管理
+    @Inject lateinit var debugLogger: DebugLogger
 
     // ========== Binder（UIからのサービス接続用）==========
 
@@ -164,6 +169,8 @@ class PlayerService : Service() {
      */
     override fun onCreate() {
         super.onCreate()
+        // ★ サービス起動ログを記録する
+        debugLogger.log(DebugLogger.Category.SERVICE, "PlayerService.onCreate() 開始")
         // 通知チャンネルを作成する（Android 8.0以上）
         notificationManager.createNotificationChannel()
         // トラックAプレイヤーを初期化する（メインスレッドで実行が必要）
@@ -253,6 +260,8 @@ class PlayerService : Service() {
      */
     override fun onDestroy() {
         super.onDestroy()
+        // ★ サービス終了ログを記録する
+        debugLogger.log(DebugLogger.Category.SERVICE, "PlayerService.onDestroy() 開始")
         // BroadcastReceiverを解除する
         unregisterReceiver(notificationActionReceiver)
         // フェードをすべてキャンセルする
@@ -309,40 +318,62 @@ class PlayerService : Service() {
         this.fadeInSeconds = fadeInSeconds
         this.fadeOutSeconds = fadeOutSeconds
         this.fadeOutBeforeEndSeconds = fadeOutBeforeEndSeconds
+        // ★ 再生開始ログを記録する
+        debugLogger.log(DebugLogger.Category.PLAYBACK,
+            "startPlayback: A=${trackAFolderPath.takeLast(30)} B=${trackBFolderPath.takeLast(30)} " +
+            "vol(A=$trackAVolume B=$trackBVolume) speed=$speed idx=$trackAIndex pos=${trackAPositionMs}ms"
+        )
         // フェードアウト開始秒数をトラックAプレイヤーに設定する
         trackAPlayer.fadeOutBeforeEndSeconds = fadeOutBeforeEndSeconds
         // 再生速度を設定する
         speedController.setSpeed(speed)
         // トラックAのフォルダを設定する
         trackAPlayer.setFolder(trackAFolderPath)
-        // トラックBのフォルダを設定する（保存済みシャッフルリストがあれば復元する）
-        trackBPlayer.setFolder(trackBFolderPath, savedShuffleList, savedShuffleIndex)
         // トラックAの音量を設定する
         trackAPlayer.setVolume(trackAVolume)
-        // トラックBの音量を0にする（フェードインで上げる）
-        fadeController.setVolume(0f)
-        // トラックAの再生を開始する
+        // ★【トラックA/Bスタンドアローン修正】
+        // トラックAはトラックBのスキャン完了を待たずに即座に再生を開始する。
+        // トラックBのフォルダスキャンは非同期（IOスレッド）で実行され、
+        // 完了次第 onReady コールバックで再生を開始する。
+        // これによりトラックBのスキャン中もトラックAが正常に再生される。
+
+        // トラックAの再生を即座に開始する（トラックBのスキャン完了を待たない）
         trackAPlayer.play(trackAIndex, trackAPositionMs)
-        // トラックBの再生を開始する
-        trackBPlayer.play()
-        // トラックBをフェードインする
-        val targetVolumeB = calculateTrackBVolume()
-        fadeController.fadeIn(targetVolumeB, fadeInSeconds)
-        // 再生中フラグを更新する
+        // 再生中フラグを更新する（通知でボタン状態を正しく反映するため先に更新する）
         _isPlaying.value = true
         // 通知を更新する
         updateNotification()
+
+        // トラックBは非同期スキャン完了後に再生開始する
+        // ★ setFolder の onReady コールバックでトラックBの再生とフェードインを行う
+        trackBPlayer.setFolder(trackBFolderPath, savedShuffleList, savedShuffleIndex) {
+            // スキャン完了（Mainスレッドで呼ばれる）
+            // トラックBの音量を0にする（フェードインで上げる）
+            fadeController.setVolume(0f)
+            // トラックBの再生を開始する
+            trackBPlayer.play()
+            // トラックBをフェードインする
+            val targetVolumeB = calculateTrackBVolume()
+            fadeController.fadeIn(targetVolumeB, fadeInSeconds)
+        }
     }
 
     /**
      * 一時停止中の再生を再開するメソッド
+     * ★【修正】旧実装は trackBPlayer.pause()→play() を呼んで loadCurrentFile() が走り
+     *   setMediaItem()/prepare() が実行されてしまい、オーディオフォーカスの競合で
+     *   トラックAが止まる問題があった。
+     *   トラックBがすでに準備済み（IDLE でない）なら resume() だけ呼ぶように修正した。
      */
     fun resumePlayback() {
+        // ★ 再開ログを記録する
+        debugLogger.log(DebugLogger.Category.PLAYBACK, "resumePlayback: トラックA・B再開")
         // トラックAを再開する
         trackAPlayer.resume()
         // トラックBを再開する
-        trackBPlayer.pause() // まず停止状態にする
-        trackBPlayer.play()
+        // ★ pause()→play()にすると内部でloadCurrentFile()が呼ばれsetMediaItem/prepareが
+        //   走りトラックAのフォーカスを奪うため、resume()（play()のみ）で再開する
+        trackBPlayer.resume()
         // トラックBをフェードインする
         val targetVolumeB = calculateTrackBVolume()
         fadeController.fadeIn(targetVolumeB, fadeInSeconds)
@@ -356,6 +387,8 @@ class PlayerService : Service() {
      * 再生を一時停止するメソッド
      */
     fun pausePlayback() {
+        // ★ 一時停止ログを記録する
+        debugLogger.log(DebugLogger.Category.PLAYBACK, "pausePlayback: 一時停止（フェードアウト開始）")
         // トラックAを一時停止する
         trackAPlayer.pause()
         // トラックBをフェードアウトしてから一時停止する
@@ -375,6 +408,8 @@ class PlayerService : Service() {
      * 再生を完全に停止するメソッド
      */
     fun stopPlayback() {
+        // ★ 完全停止ログを記録する
+        debugLogger.log(DebugLogger.Category.PLAYBACK, "stopPlayback: 完全停止")
         // フェードをキャンセルする
         fadeController.cancelAllFades()
         // トラックA・Bを停止する
@@ -423,12 +458,15 @@ class PlayerService : Service() {
      */
     fun setTrackAVolume(volume: Float) {
         trackAVolume = volume.coerceIn(0f, 1f)
+        // ★ 音量変更ログを記録する
+        debugLogger.log(DebugLogger.Category.VOLUME, "TrackA 音量変更: $trackAVolume")
         // トラックAの音量を直接設定する
         trackAPlayer.setVolume(trackAVolume)
         // 連動モードの場合はトラックBの音量も更新する
+        // ★【音量調節修正】フェード中断しないupdateTargetVolumeを使う
         if (trackBLinkedToA) {
             val targetVolumeB = calculateTrackBVolume()
-            fadeController.setVolume(targetVolumeB)
+            fadeController.updateTargetVolume(targetVolumeB)
         }
     }
 
@@ -439,9 +477,11 @@ class PlayerService : Service() {
      */
     fun setTrackBVolume(volume: Float) {
         trackBVolume = volume.coerceIn(0f, 1f)
-        // 連動モードの場合は計算した音量を適用する
+        // ★ 音量変更ログを記録する
+        debugLogger.log(DebugLogger.Category.VOLUME, "TrackB 音量変更: $trackBVolume → 実効値: ${calculateTrackBVolume()}")
+        // ★【音量調節修正】フェード中断しないupdateTargetVolumeを使う
         val targetVolumeB = calculateTrackBVolume()
-        fadeController.setVolume(targetVolumeB)
+        fadeController.updateTargetVolume(targetVolumeB)
     }
 
     /**

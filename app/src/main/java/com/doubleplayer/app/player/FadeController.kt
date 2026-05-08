@@ -151,7 +151,7 @@ class FadeController @Inject constructor() {
     }
 
     /**
-     * 現在の音量を即座に設定するメソッド
+     * 現在の音量を即座に設定するメソッド（フェード処理を中断する）
      * ★ このメソッドはメインスレッドから呼ぶこと（PlayerServiceから呼ぶため問題なし）
      *
      * @param volume 設定する音量（0.0f〜1.0f）
@@ -162,6 +162,21 @@ class FadeController @Inject constructor() {
         // 音量を即座に設定する
         currentVolume = volume.coerceIn(0f, 1f)
         // コールバックで通知する（呼び出し元がメインスレッドのため直接呼ぶ）
+        onVolumeChanged?.invoke(currentVolume)
+    }
+
+    /**
+     * フェード処理を中断せずに現在の目標音量だけを更新するメソッド
+     * ★【音量調節修正】スライダー操作など、フェード中でも即座に音量レベルを変えたい場合に使う。
+     *   setVolume()はフェードを中断してしまうが、このメソッドはフェードを継続しながら
+     *   次のフェードの目標音量を変更する（現在音量も直ちに反映する）。
+     *   再生中にスライダーを動かした場合は currentVolume を直接書き換えてコールバックを呼ぶ。
+     *
+     * @param volume 新しい目標音量（0.0f〜1.0f）
+     */
+    fun updateTargetVolume(volume: Float) {
+        // フェードを中断せず現在音量だけ更新してコールバックで通知する
+        currentVolume = volume.coerceIn(0f, 1f)
         onVolumeChanged?.invoke(currentVolume)
     }
 

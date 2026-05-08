@@ -62,7 +62,7 @@ fun SettingsScreen(
     val snackbarMessage by viewModel.snackbarMessage.collectAsStateWithLifecycle()
     val isProcessing by viewModel.isProcessing.collectAsStateWithLifecycle()
 
-    // 現在選択中のタブインデックス（0=フォルダ, 1=スケジュール, 2=再生設定）
+    // 現在選択中のタブインデックス（0=フォルダ, 1=スケジュール, 2=再生設定, 3=デバッグ）
     var selectedTab by remember { mutableIntStateOf(0) }
 
     // Snackbarの状態管理
@@ -135,6 +135,18 @@ fun SettingsScreen(
                     },
                     text = { Text("再生設定") }
                 )
+                // ★ デバッグタブ（AIへのバグ報告用）
+                Tab(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.BugReport,
+                            contentDescription = "デバッグ"
+                        )
+                    },
+                    text = { Text("デバッグ") }
+                )
             }
 
             // ========== タブのコンテンツ ==========
@@ -191,6 +203,8 @@ fun SettingsScreen(
                         importLauncher.launch("*/*")
                     }
                 )
+                // ★ デバッグタブのコンテンツ
+                3 -> DebugScreen()
             }
         }
     }
